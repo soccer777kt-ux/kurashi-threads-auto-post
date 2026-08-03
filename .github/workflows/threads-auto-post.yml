@@ -1,31 +1,6 @@
 name: Threads Auto Post
 
 on:
-  schedule:
-    # Primary runs and 30-minute fallbacks. post_threads.py deduplicates each slot.
-    - cron: "50 7 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "20 8 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "30 10 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "0 11 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "50 12 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "20 13 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "0 18 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "30 18 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "40 20 * * *"
-      timezone: "Asia/Tokyo"
-    - cron: "10 21 * * *"
-      timezone: "Asia/Tokyo"
-    # Temporary five-minute scheduler probe. Restore after schedule is confirmed.
-    - cron: "*/5 * * * *"
-      timezone: "Asia/Tokyo"
   workflow_dispatch:
     inputs:
       dry_run:
