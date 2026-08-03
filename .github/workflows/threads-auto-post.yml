@@ -23,8 +23,8 @@ on:
       timezone: "Asia/Tokyo"
     - cron: "10 21 * * *"
       timezone: "Asia/Tokyo"
-    # Daily scheduler health check. It is outside every posting window.
-    - cron: "27 23 * * *"
+    # Temporary five-minute scheduler probe. Restore after schedule is confirmed.
+    - cron: "*/5 * * * *"
       timezone: "Asia/Tokyo"
   workflow_dispatch:
     inputs:
