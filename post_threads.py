@@ -22,16 +22,17 @@ STATE_PATH = ROOT / "state.json"
 API_BASE = "https://graph.threads.net/v1.0"
 JST = ZoneInfo("Asia/Tokyo")
 
-# Monday=0 ... Sunday=6. Five daily slots with slightly varied times.
-DAILY_TARGETS = {
-    0: {"early": (7, 43), "late_morning": (10, 26), "lunch": (12, 48), "evening": (17, 54), "night": (20, 37)},
-    1: {"early": (8, 12), "late_morning": (10, 41), "lunch": (13, 6), "evening": (18, 23), "night": (21, 8)},
-    2: {"early": (7, 28), "late_morning": (9, 52), "lunch": (12, 42), "evening": (17, 37), "night": (19, 53)},
-    3: {"early": (8, 36), "late_morning": (11, 2), "lunch": (13, 21), "evening": (18, 8), "night": (20, 24)},
-    4: {"early": (7, 51), "late_morning": (10, 18), "lunch": (12, 44), "evening": (18, 49), "night": (21, 16)},
-    5: {"early": (8, 47), "late_morning": (11, 12), "lunch": (13, 34), "evening": (17, 21), "night": (19, 34)},
-    6: {"early": (8, 8), "late_morning": (10, 36), "lunch": (13, 21), "evening": (17, 52), "night": (20, 48)},
+# Monday=0 ... Sunday=6. Keep these aligned with the primary workflow schedules.
+# Each primary run also has a workflow-level retry 30 minutes later. The state file
+# prevents that retry from creating a duplicate after a successful primary run.
+DAILY_SLOTS = {
+    "early": (7, 50),
+    "late_morning": (10, 30),
+    "lunch": (12, 50),
+    "evening": (18, 0),
+    "night": (20, 40),
 }
+DAILY_TARGETS = {weekday: DAILY_SLOTS for weekday in range(7)}
 MIN_POST_INTERVAL = timedelta(minutes=90)
 SLOT_GRACE = timedelta(minutes=90)
 
@@ -111,12 +112,14 @@ def main() -> int:
         return 0
 
     now = datetime.now(JST)
+    print(f"実行時刻（日本時間）: {now.isoformat()}")
     slot_name = None
     if args.scheduled:
         slot_name = scheduled_slot(state, now)
         if slot_name is None:
             print("現在は投稿時刻ではないか、この時間帯は投稿済みです。")
             return 0
+        print(f"対象時間帯: {slot_name}")
 
     next_index = state.get("next_index", 0) if args.index is None else args.index
     if next_index >= len(posts):
