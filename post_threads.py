@@ -22,18 +22,18 @@ STATE_PATH = ROOT / "state.json"
 API_BASE = "https://graph.threads.net/v1.0"
 JST = ZoneInfo("Asia/Tokyo")
 
-# Monday=0 ... Sunday=6. Times vary slightly so the account does not look mechanical.
+# Monday=0 ... Sunday=6. Five daily slots with slightly varied times.
 DAILY_TARGETS = {
-    0: {"morning": (7, 43), "lunch": (12, 18), "evening": (20, 37)},
-    1: {"morning": (8, 12), "lunch": (11, 51), "evening": (21, 8)},
-    2: {"morning": (7, 28), "lunch": (12, 42), "evening": (19, 53)},
-    3: {"morning": (8, 36), "lunch": (13, 7), "evening": (20, 24)},
-    4: {"morning": (7, 51), "lunch": (12, 29), "evening": (21, 16)},
-    5: {"morning": (8, 47), "lunch": (11, 43), "evening": (19, 34)},
-    6: {"morning": (8, 8), "lunch": (13, 21), "evening": (20, 48)},
+    0: {"early": (7, 43), "late_morning": (10, 26), "lunch": (12, 48), "evening": (17, 54), "night": (20, 37)},
+    1: {"early": (8, 12), "late_morning": (10, 41), "lunch": (13, 6), "evening": (18, 23), "night": (21, 8)},
+    2: {"early": (7, 28), "late_morning": (9, 52), "lunch": (12, 42), "evening": (17, 37), "night": (19, 53)},
+    3: {"early": (8, 36), "late_morning": (11, 2), "lunch": (13, 21), "evening": (18, 8), "night": (20, 24)},
+    4: {"early": (7, 51), "late_morning": (10, 18), "lunch": (12, 44), "evening": (18, 49), "night": (21, 16)},
+    5: {"early": (8, 47), "late_morning": (11, 12), "lunch": (13, 34), "evening": (17, 21), "night": (19, 34)},
+    6: {"early": (8, 8), "late_morning": (10, 36), "lunch": (13, 21), "evening": (17, 52), "night": (20, 48)},
 }
 MIN_POST_INTERVAL = timedelta(minutes=90)
-SLOT_GRACE = timedelta(hours=2)
+SLOT_GRACE = timedelta(minutes=90)
 
 
 def load_json(path: Path, default):
@@ -56,8 +56,8 @@ def api_post(path: str, values: dict[str, str]) -> dict:
 def current_due_slot(now: datetime) -> str | None:
     """Return only the most recent slot while it is still reasonably fresh."""
     targets = DAILY_TARGETS[now.weekday()]
-    for slot_name in ("evening", "lunch", "morning"):
-        hour, minute = targets[slot_name]
+    latest_first = sorted(targets.items(), key=lambda item: item[1], reverse=True)
+    for slot_name, (hour, minute) in latest_first:
         target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= now <= target + SLOT_GRACE:
             return slot_name
@@ -123,9 +123,13 @@ def main() -> int:
         print("準備済みの投稿をすべて使い終わりました。")
         return 0
 
-    text = posts[next_index]["text"] if isinstance(posts[next_index], dict) else posts[next_index]
+    post = posts[next_index]
+    text = post["text"] if isinstance(post, dict) else post
+    image_path = post.get("image_path") if isinstance(post, dict) else None
     print(f"投稿番号: {next_index + 1}/{len(posts)}")
     print(text)
+    if image_path:
+        print(f"画像: {image_path}")
 
     if args.dry_run:
         print("\nドライランのためThreadsには投稿していません。")
@@ -136,10 +140,27 @@ def main() -> int:
         print("THREADS_ACCESS_TOKENが設定されていません。", file=sys.stderr)
         return 1
 
-    created = api_post(
-        "/me/threads",
-        {"media_type": "TEXT", "text": text, "access_token": token},
-    )
+    creation_values = {"media_type": "TEXT", "text": text, "access_token": token}
+    if image_path:
+        image_file = (ROOT / image_path).resolve()
+        try:
+            image_file.relative_to(ROOT)
+        except ValueError as error:
+            raise RuntimeError(f"画像パスが不正です: {image_path}") from error
+        if not image_file.is_file():
+            raise RuntimeError(f"画像ファイルが見つかりません: {image_path}")
+
+        repository = os.environ.get(
+            "GITHUB_REPOSITORY", "soccer777kt-ux/kurashi-threads-auto-post"
+        )
+        revision = os.environ.get("GITHUB_SHA", "main")
+        encoded_path = urllib.parse.quote(image_path, safe="/")
+        image_url = (
+            f"https://raw.githubusercontent.com/{repository}/{revision}/{encoded_path}"
+        )
+        creation_values.update({"media_type": "IMAGE", "image_url": image_url})
+
+    created = api_post("/me/threads", creation_values)
     creation_id = created.get("id")
     if not creation_id:
         raise RuntimeError(f"投稿準備IDを取得できませんでした: {created}")
