@@ -33,6 +33,7 @@ DAILY_TARGETS = {
     6: {"morning": (8, 8), "lunch": (13, 21), "evening": (20, 48)},
 }
 MIN_POST_INTERVAL = timedelta(minutes=90)
+SLOT_GRACE = timedelta(hours=2)
 
 
 def load_json(path: Path, default):
@@ -52,6 +53,17 @@ def api_post(path: str, values: dict[str, str]) -> dict:
         raise RuntimeError(f"Threads API returned HTTP {error.code}: {detail}") from error
 
 
+def current_due_slot(now: datetime) -> str | None:
+    """Return only the most recent slot while it is still reasonably fresh."""
+    targets = DAILY_TARGETS[now.weekday()]
+    for slot_name in ("evening", "lunch", "morning"):
+        hour, minute = targets[slot_name]
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now <= target + SLOT_GRACE:
+            return slot_name
+    return None
+
+
 def scheduled_slot(state: dict, now: datetime) -> str | None:
     posted_slots = set(state.get("posted_slots", []))
     last_posted_at = state.get("last_posted_at")
@@ -60,14 +72,11 @@ def scheduled_slot(state: dict, now: datetime) -> str | None:
         if now - last_time < MIN_POST_INTERVAL:
             return None
 
-    targets = DAILY_TARGETS[now.weekday()]
-    for slot_name in ("morning", "lunch", "evening"):
-        hour, minute = targets[slot_name]
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        slot_key = f"{now.date().isoformat()}-{slot_name}"
-        if now >= target and slot_key not in posted_slots:
-            return slot_name
-    return None
+    slot_name = current_due_slot(now)
+    if slot_name is None:
+        return None
+    slot_key = f"{now.date().isoformat()}-{slot_name}"
+    return None if slot_key in posted_slots else slot_name
 
 
 def publish_with_retry(creation_id: str, token: str) -> dict:
@@ -144,10 +153,11 @@ def main() -> int:
         state["next_index"] = next_index + 1
     state["last_post_id"] = post_id
     state["last_posted_at"] = now.isoformat()
-    if slot_name:
+    completed_slot = slot_name or current_due_slot(now)
+    if completed_slot:
         cutoff = (now.date() - timedelta(days=14)).isoformat()
         slots = [item for item in state.get("posted_slots", []) if item[:10] >= cutoff]
-        slots.append(f"{now.date().isoformat()}-{slot_name}")
+        slots.append(f"{now.date().isoformat()}-{completed_slot}")
         state["posted_slots"] = slots
 
     STATE_PATH.write_text(
