@@ -2,9 +2,8 @@ name: Threads Scheduled Post
 
 on:
   schedule:
-    # Temporary five-minute probe. Replace with the production slots after confirmation.
+    # Temporary UTC-only probe to verify GitHub's scheduler registration.
     - cron: "*/5 * * * *"
-      timezone: "Asia/Tokyo"
 
 permissions:
   contents: write
