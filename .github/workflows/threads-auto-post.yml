@@ -2,7 +2,30 @@ name: Threads Auto Post
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    # Primary runs and 30-minute fallbacks. post_threads.py deduplicates each slot.
+    - cron: "50 7 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "20 8 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "30 10 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "0 11 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "50 12 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "20 13 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "0 18 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "30 18 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "40 20 * * *"
+      timezone: "Asia/Tokyo"
+    - cron: "10 21 * * *"
+      timezone: "Asia/Tokyo"
+    # Daily scheduler health check. It is outside every posting window.
+    - cron: "17 23 * * *"
+      timezone: "Asia/Tokyo"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -26,7 +49,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
+
+      - name: Refresh latest posting state
+        run: git pull --ff-only origin main
 
       - name: Set up Python
         uses: actions/setup-python@v5
