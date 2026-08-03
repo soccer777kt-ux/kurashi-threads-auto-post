@@ -4,6 +4,7 @@ on:
   schedule:
     # Temporary UTC-only probe to verify GitHub's scheduler registration.
     - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 permissions:
   contents: write
