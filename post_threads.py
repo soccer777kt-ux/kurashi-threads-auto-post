@@ -33,7 +33,7 @@ DAILY_SLOTS = {
     "night": (20, 40),
 }
 DAILY_TARGETS = {weekday: DAILY_SLOTS for weekday in range(7)}
-MIN_POST_INTERVAL = timedelta(minutes=90)
+MIN_POST_INTERVAL = timedelta(minutes=60)
 SLOT_GRACE = timedelta(minutes=90)
 
 
@@ -73,11 +73,15 @@ def scheduled_slot(state: dict, now: datetime) -> str | None:
         if now - last_time < MIN_POST_INTERVAL:
             return None
 
-    slot_name = current_due_slot(now)
-    if slot_name is None:
-        return None
-    slot_key = f"{now.date().isoformat()}-{slot_name}"
-    return None if slot_key in posted_slots else slot_name
+    # Catch up the earliest missed slot for today. Each scheduled/monitor run
+    # publishes at most one post, while the minimum interval prevents bursts.
+    targets = DAILY_TARGETS[now.weekday()]
+    for slot_name, (hour, minute) in sorted(targets.items(), key=lambda item: item[1]):
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        slot_key = f"{now.date().isoformat()}-{slot_name}"
+        if target <= now and slot_key not in posted_slots:
+            return slot_name
+    return None
 
 
 def publish_with_retry(creation_id: str, token: str) -> dict:
