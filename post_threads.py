@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -22,19 +23,18 @@ STATE_PATH = ROOT / "state.json"
 API_BASE = "https://graph.threads.net/v1.0"
 JST = ZoneInfo("Asia/Tokyo")
 
-# Monday=0 ... Sunday=6. Keep these aligned with the primary workflow schedules.
-# Each primary run also has a workflow-level retry 30 minutes later. The state file
-# prevents that retry from creating a duplicate after a successful primary run.
-DAILY_SLOTS = {
-    "early": (7, 50),
-    "late_morning": (10, 30),
-    "lunch": (12, 50),
-    "evening": (18, 0),
-    "night": (20, 40),
+# Two daily posting windows in Japan time. The workflow starts shortly before
+# each window, and this script picks one stable pseudo-random minute per day.
+# Fallback workflow runs calculate the same target, so they cannot move the post
+# or create a duplicate after a successful primary run.
+DAILY_WINDOWS = {
+    "lunch": ((12, 0), (13, 0)),
+    "night": ((20, 0), (21, 0)),
 }
-DAILY_TARGETS = {weekday: DAILY_SLOTS for weekday in range(7)}
+DAILY_TARGETS = {weekday: DAILY_WINDOWS for weekday in range(7)}
 MIN_POST_INTERVAL = timedelta(minutes=60)
-SLOT_GRACE = timedelta(minutes=90)
+EARLY_START = timedelta(minutes=10)
+SLOT_GRACE = timedelta(minutes=15)
 
 
 def load_json(path: Path, default):
@@ -54,18 +54,32 @@ def api_post(path: str, values: dict[str, str]) -> dict:
         raise RuntimeError(f"Threads API returned HTTP {error.code}: {detail}") from error
 
 
+def slot_timing(now: datetime, slot_name: str) -> tuple[datetime, datetime, datetime]:
+    """Return window start, the day's random target, and window end."""
+    start_hm, end_hm = DAILY_TARGETS[now.weekday()][slot_name]
+    start = now.replace(hour=start_hm[0], minute=start_hm[1], second=0, microsecond=0)
+    end = now.replace(hour=end_hm[0], minute=end_hm[1], second=0, microsecond=0)
+    available_minutes = int((end - start).total_seconds() // 60)
+    seed = f"kurashi_yutakanii:{now.date().isoformat()}:{slot_name}:v1"
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    offset_minutes = int.from_bytes(digest[:8], "big") % available_minutes
+    target = start + timedelta(minutes=offset_minutes)
+    return start, target, end
+
+
 def current_due_slot(now: datetime) -> str | None:
-    """Return only the most recent slot while it is still reasonably fresh."""
+    """Return the current random slot while it is still reasonably fresh."""
     targets = DAILY_TARGETS[now.weekday()]
-    latest_first = sorted(targets.items(), key=lambda item: item[1], reverse=True)
-    for slot_name, (hour, minute) in latest_first:
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if target <= now <= target + SLOT_GRACE:
+    latest_first = sorted(targets, key=lambda name: targets[name][0], reverse=True)
+    for slot_name in latest_first:
+        _, target, end = slot_timing(now, slot_name)
+        if target <= now <= end + SLOT_GRACE:
             return slot_name
     return None
 
 
-def scheduled_slot(state: dict, now: datetime) -> str | None:
+def scheduled_slot(state: dict, now: datetime) -> tuple[str, datetime] | None:
+    """Return one unposted slot and its stable random target time."""
     posted_slots = set(state.get("posted_slots", []))
     last_posted_at = state.get("last_posted_at")
     if last_posted_at:
@@ -73,14 +87,14 @@ def scheduled_slot(state: dict, now: datetime) -> str | None:
         if now - last_time < MIN_POST_INTERVAL:
             return None
 
-    # Catch up the earliest missed slot for today. Each scheduled/monitor run
-    # publishes at most one post, while the minimum interval prevents bursts.
     targets = DAILY_TARGETS[now.weekday()]
-    for slot_name, (hour, minute) in sorted(targets.items(), key=lambda item: item[1]):
-        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    for slot_name in sorted(targets, key=lambda name: targets[name][0]):
+        start, target, end = slot_timing(now, slot_name)
         slot_key = f"{now.date().isoformat()}-{slot_name}"
-        if target <= now and slot_key not in posted_slots:
-            return slot_name
+        if slot_key in posted_slots:
+            continue
+        if start - EARLY_START <= now <= end + SLOT_GRACE:
+            return slot_name, target
     return None
 
 
@@ -119,10 +133,17 @@ def main() -> int:
     print(f"実行時刻（日本時間）: {now.isoformat()}")
     slot_name = None
     if args.scheduled:
-        slot_name = scheduled_slot(state, now)
-        if slot_name is None:
-            print("現在は投稿時刻ではないか、この時間帯は投稿済みです。")
+        due = scheduled_slot(state, now)
+        if due is None:
+            print("現在は投稿時間帯ではないか、この時間帯は投稿済みです。")
             return 0
+        slot_name, target_time = due
+        if now < target_time:
+            wait_seconds = (target_time - now).total_seconds()
+            print(f"本日のランダム投稿時刻: {target_time.isoformat()}")
+            print(f"投稿時刻まで約{int(wait_seconds // 60)}分待機します。")
+            time.sleep(wait_seconds)
+            now = datetime.now(JST)
         print(f"対象時間帯: {slot_name}")
 
     next_index = state.get("next_index", 0) if args.index is None else args.index
