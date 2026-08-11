@@ -3,7 +3,11 @@ name: Threads Scheduled Post
 on:
   schedule:
     # Start shortly before each Japan-time window. The Python script chooses a
-    # stable random minute inside the hour; later entries are no-op fallbacks.
+    # stable random minute inside the window; later entries are no-op fallbacks.
+    # Morning window 07:30-08:00 JST
+    - cron: "25 22 * * *"
+    - cron: "45 22 * * *"
+    - cron: "55 22 * * *"
     # Lunch window 12:00-13:00 JST
     - cron: "55 2 * * *"
     - cron: "30 3 * * *"
