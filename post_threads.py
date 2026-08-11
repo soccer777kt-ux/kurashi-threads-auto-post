@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent
 POSTS_PATH = ROOT / "posts.json"
+AFFILIATE_POSTS_PATH = ROOT / "affiliate_posts.json"
 STATE_PATH = ROOT / "state.json"
 API_BASE = "https://graph.threads.net/v1.0"
 JST = ZoneInfo("Asia/Tokyo")
@@ -44,6 +45,10 @@ MIN_POST_INTERVAL = timedelta(minutes=60)
 EARLY_START = timedelta(minutes=10)
 SLOT_GRACE = timedelta(minutes=15)
 WEATHER_WEEKDAYS = {0, 2, 5}  # Monday, Wednesday, Saturday
+AFFILIATE_SCHEDULE = {
+    1: {"night"},  # Tuesday night
+    4: {"lunch"},  # Friday lunch
+}
 NON_WEATHER_MORNING_POSTS = (
     (
         "おはようございます🌿\n\n"
@@ -251,6 +256,11 @@ def scheduled_slot(state: dict, now: datetime) -> tuple[str, datetime] | None:
     return None
 
 
+def is_affiliate_slot(now: datetime, slot_name: str | None) -> bool:
+    """Return True for the two weekly affiliate posting slots."""
+    return bool(slot_name and slot_name in AFFILIATE_SCHEDULE.get(now.weekday(), set()))
+
+
 def publish_with_retry(creation_id: str, token: str) -> dict:
     last_error: Exception | None = None
     for attempt in range(6):
@@ -277,6 +287,7 @@ def main() -> int:
     args = parser.parse_args()
 
     posts = load_json(POSTS_PATH, [])
+    affiliate_posts = load_json(AFFILIATE_POSTS_PATH, [])
     state = load_json(STATE_PATH, {"next_index": 0, "posted_slots": []})
     now = datetime.now(JST)
     print(f"実行時刻（日本時間）: {now.isoformat()}")
@@ -296,9 +307,16 @@ def main() -> int:
             now = datetime.now(JST)
         print(f"対象時間帯: {slot_name}")
 
+    is_affiliate = False
+    affiliate_index = None
     if slot_name == "morning":
         next_index = None
         post = {"text": build_morning_post(now)}
+    elif args.scheduled and is_affiliate_slot(now, slot_name) and affiliate_posts:
+        is_affiliate = True
+        next_index = None
+        affiliate_index = state.get("next_affiliate_index", 0)
+        post = affiliate_posts[affiliate_index % len(affiliate_posts)]
     else:
         if not posts:
             print("投稿データがありません。")
@@ -311,8 +329,13 @@ def main() -> int:
 
     text = post["text"] if isinstance(post, dict) else post
     image_path = post.get("image_path") if isinstance(post, dict) else None
-    if next_index is None:
+    if slot_name == "morning":
         print("朝の天気・共感投稿")
+    elif is_affiliate:
+        print(
+            f"Amazonアソシエイト投稿: "
+            f"{affiliate_index % len(affiliate_posts) + 1}/{len(affiliate_posts)}"
+        )
     else:
         print(f"投稿番号: {next_index + 1}/{len(posts)}")
     print(text)
@@ -360,6 +383,8 @@ def main() -> int:
 
     if args.index is None and next_index is not None:
         state["next_index"] = next_index + 1
+    if is_affiliate and affiliate_index is not None:
+        state["next_affiliate_index"] = affiliate_index + 1
     state["last_post_id"] = post_id
     state["last_posted_at"] = now.isoformat()
     completed_slot = slot_name or current_due_slot(now)
