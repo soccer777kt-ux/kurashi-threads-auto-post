@@ -22,12 +22,20 @@ POSTS_PATH = ROOT / "posts.json"
 STATE_PATH = ROOT / "state.json"
 API_BASE = "https://graph.threads.net/v1.0"
 JST = ZoneInfo("Asia/Tokyo")
+TOKYO_WEATHER_URL = (
+    "https://api.open-meteo.com/v1/forecast"
+    "?latitude=35.6762&longitude=139.6503"
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
+    "precipitation_probability_max"
+    "&timezone=Asia%2FTokyo&forecast_days=1"
+)
 
-# Two daily posting windows in Japan time. The workflow starts shortly before
+# Three daily posting windows in Japan time. The workflow starts shortly before
 # each window, and this script picks one stable pseudo-random minute per day.
 # Fallback workflow runs calculate the same target, so they cannot move the post
 # or create a duplicate after a successful primary run.
 DAILY_WINDOWS = {
+    "morning": ((7, 30), (8, 0)),
     "lunch": ((12, 0), (13, 0)),
     "night": ((20, 0), (21, 0)),
 }
@@ -52,6 +60,106 @@ def api_post(path: str, values: dict[str, str]) -> dict:
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Threads API returned HTTP {error.code}: {detail}") from error
+
+
+def weather_label(code: int) -> tuple[str, str]:
+    """Return a short Japanese forecast label and emoji for a WMO weather code."""
+    if code == 0:
+        return "晴れ", "☀️"
+    if code == 1:
+        return "晴れ時々くもり", "🌤️"
+    if code == 2:
+        return "晴れたりくもったり", "⛅"
+    if code == 3:
+        return "くもり", "☁️"
+    if code in (45, 48):
+        return "霧", "🌫️"
+    if 51 <= code <= 57:
+        return "小雨", "🌦️"
+    if 61 <= code <= 67:
+        return "雨", "☔"
+    if 71 <= code <= 77:
+        return "雪", "❄️"
+    if 80 <= code <= 82:
+        return "にわか雨", "🌦️"
+    if code in (85, 86):
+        return "にわか雪", "🌨️"
+    if 95 <= code <= 99:
+        return "雷雨", "⛈️"
+    return "変わりやすい空", "🌤️"
+
+
+def fetch_tokyo_weather() -> dict | None:
+    """Fetch today's Tokyo forecast; return None so posting can continue on failure."""
+    request = urllib.request.Request(
+        TOKYO_WEATHER_URL,
+        headers={"User-Agent": "kurashi-threads-auto-post/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        daily = payload["daily"]
+        code = int(daily["weather_code"][0])
+        description, emoji = weather_label(code)
+        return {
+            "code": code,
+            "description": description,
+            "emoji": emoji,
+            "max_temp": round(float(daily["temperature_2m_max"][0])),
+            "min_temp": round(float(daily["temperature_2m_min"][0])),
+            "rain_probability": round(
+                float(daily["precipitation_probability_max"][0])
+            ),
+        }
+    except (KeyError, IndexError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
+        print(f"東京の天気を取得できなかったため通常の朝投稿にします: {error}")
+        return None
+
+
+def build_morning_post(now: datetime) -> str:
+    """Create a short Tokyo-weather greeting with a relatable parenting line."""
+    weather = fetch_tokyo_weather()
+    if weather is None:
+        fallback_lines = (
+            "靴下ひとつで予定が5分ずれる朝😂",
+            "『自分でやる！』を待つ時間も、朝の大仕事😂",
+            "出発直前の『トイレ！』までが朝のセット😂",
+        )
+        digest = hashlib.sha256(now.date().isoformat().encode("utf-8")).digest()
+        empathy = fallback_lines[digest[0] % len(fallback_lines)]
+        return (
+            "おはようございます☀️\n\n"
+            "東京の朝。5歳と2歳の支度は今日もにぎやか。\n"
+            f"{empathy}\n\n"
+            "今日も無理せずいきましょう。"
+        )
+
+    code = weather["code"]
+    rain_probability = weather["rain_probability"]
+    max_temp = weather["max_temp"]
+    min_temp = weather["min_temp"]
+    if rain_probability >= 50 or 51 <= code <= 67 or 80 <= code <= 82:
+        empathy = "傘＋2人の手を守る雨の朝、家を出るだけで満点😂"
+    elif max_temp >= 30:
+        empathy = "水筒と帽子の確認だけで、朝からひと仕事😂"
+    elif min_temp <= 10:
+        empathy = "上着を着せるだけでも、朝はひと仕事😂"
+    else:
+        empathy_lines = (
+            "靴下ひとつで予定が5分ずれる朝😂",
+            "『自分でやる！』を待つ時間も、朝の大仕事😂",
+            "出発直前の『トイレ！』までが朝のセット😂",
+        )
+        digest = hashlib.sha256(now.date().isoformat().encode("utf-8")).digest()
+        empathy = empathy_lines[digest[0] % len(empathy_lines)]
+
+    return (
+        f"おはようございます{weather['emoji']}\n\n"
+        f"東京は{weather['description']}、最高{max_temp}℃／最低{min_temp}℃。"
+        f"降水確率{rain_probability}％。\n"
+        f"{empathy}\n\n"
+        "今日も無理せずいきましょう。"
+    )
 
 
 def slot_timing(now: datetime, slot_name: str) -> tuple[datetime, datetime, datetime]:
@@ -125,12 +233,9 @@ def main() -> int:
 
     posts = load_json(POSTS_PATH, [])
     state = load_json(STATE_PATH, {"next_index": 0, "posted_slots": []})
-    if not posts:
-        print("投稿データがありません。")
-        return 0
-
     now = datetime.now(JST)
     print(f"実行時刻（日本時間）: {now.isoformat()}")
+
     slot_name = None
     if args.scheduled:
         due = scheduled_slot(state, now)
@@ -146,15 +251,25 @@ def main() -> int:
             now = datetime.now(JST)
         print(f"対象時間帯: {slot_name}")
 
-    next_index = state.get("next_index", 0) if args.index is None else args.index
-    if next_index >= len(posts):
-        print("準備済みの投稿をすべて使い終わりました。")
-        return 0
+    if slot_name == "morning":
+        next_index = None
+        post = {"text": build_morning_post(now)}
+    else:
+        if not posts:
+            print("投稿データがありません。")
+            return 0
+        next_index = state.get("next_index", 0) if args.index is None else args.index
+        if next_index >= len(posts):
+            print("準備済みの投稿をすべて使い終わりました。")
+            return 0
+        post = posts[next_index]
 
-    post = posts[next_index]
     text = post["text"] if isinstance(post, dict) else post
     image_path = post.get("image_path") if isinstance(post, dict) else None
-    print(f"投稿番号: {next_index + 1}/{len(posts)}")
+    if next_index is None:
+        print("朝の天気・共感投稿")
+    else:
+        print(f"投稿番号: {next_index + 1}/{len(posts)}")
     print(text)
     if image_path:
         print(f"画像: {image_path}")
@@ -198,7 +313,7 @@ def main() -> int:
     if not post_id:
         raise RuntimeError(f"投稿IDを取得できませんでした: {published}")
 
-    if args.index is None:
+    if args.index is None and next_index is not None:
         state["next_index"] = next_index + 1
     state["last_post_id"] = post_id
     state["last_posted_at"] = now.isoformat()
