@@ -42,8 +42,11 @@ DAILY_WINDOWS = {
 }
 DAILY_TARGETS = {weekday: DAILY_WINDOWS for weekday in range(7)}
 MIN_POST_INTERVAL = timedelta(minutes=60)
-EARLY_START = timedelta(minutes=10)
-SLOT_GRACE = timedelta(minutes=15)
+# GitHub's scheduled runs are best-effort and may arrive late.  Keep each slot
+# recoverable for a little over two hours, while stopping before the next slot.
+SLOT_GRACE = timedelta(hours=2, minutes=15)
+SLOT_TARGET_OFFSET_MINUTES = 7
+SLOT_TARGET_STEP_MINUTES = 10
 WEATHER_WEEKDAYS = {0, 2, 5}  # Monday, Wednesday, Saturday
 AFFILIATE_SCHEDULE = {
     1: {"night"},  # Tuesday night
@@ -220,7 +223,14 @@ def slot_timing(now: datetime, slot_name: str) -> tuple[datetime, datetime, date
     available_minutes = int((end - start).total_seconds() // 60)
     seed = f"kurashi_yutakanii:{now.date().isoformat()}:{slot_name}:v1"
     digest = hashlib.sha256(seed.encode("utf-8")).digest()
-    offset_minutes = int.from_bytes(digest[:8], "big") % available_minutes
+    # Pick from the same off-hour minutes used by GitHub Actions.  This keeps
+    # the post inside the requested window without a long-running sleep job.
+    candidates = list(
+        range(SLOT_TARGET_OFFSET_MINUTES, available_minutes, SLOT_TARGET_STEP_MINUTES)
+    )
+    if not candidates:
+        candidates = [0]
+    offset_minutes = candidates[int.from_bytes(digest[:8], "big") % len(candidates)]
     target = start + timedelta(minutes=offset_minutes)
     return start, target, end
 
@@ -237,7 +247,11 @@ def current_due_slot(now: datetime) -> str | None:
 
 
 def scheduled_slot(state: dict, now: datetime) -> tuple[str, datetime] | None:
-    """Return one unposted slot and its stable random target time."""
+    """Return one due, unposted slot and its stable random target time.
+
+    Scheduled jobs never sleep until the random target.  GitHub runs this check
+    repeatedly and the first run at or after the target publishes the post.
+    """
     posted_slots = set(state.get("posted_slots", []))
     last_posted_at = state.get("last_posted_at")
     if last_posted_at:
@@ -247,11 +261,11 @@ def scheduled_slot(state: dict, now: datetime) -> tuple[str, datetime] | None:
 
     targets = DAILY_TARGETS[now.weekday()]
     for slot_name in sorted(targets, key=lambda name: targets[name][0]):
-        start, target, end = slot_timing(now, slot_name)
+        _, target, end = slot_timing(now, slot_name)
         slot_key = f"{now.date().isoformat()}-{slot_name}"
         if slot_key in posted_slots:
             continue
-        if start - EARLY_START <= now <= end + SLOT_GRACE:
+        if target <= now <= end + SLOT_GRACE:
             return slot_name, target
     return None
 
@@ -299,12 +313,7 @@ def main() -> int:
             print("現在は投稿時間帯ではないか、この時間帯は投稿済みです。")
             return 0
         slot_name, target_time = due
-        if now < target_time:
-            wait_seconds = (target_time - now).total_seconds()
-            print(f"本日のランダム投稿時刻: {target_time.isoformat()}")
-            print(f"投稿時刻まで約{int(wait_seconds // 60)}分待機します。")
-            time.sleep(wait_seconds)
-            now = datetime.now(JST)
+        print(f"本日のランダム投稿時刻: {target_time.isoformat()}")
         print(f"対象時間帯: {slot_name}")
 
     is_affiliate = False
@@ -321,10 +330,15 @@ def main() -> int:
         if not posts:
             print("投稿データがありません。")
             return 0
-        next_index = state.get("next_index", 0) if args.index is None else args.index
-        if next_index >= len(posts):
-            print("準備済みの投稿をすべて使い終わりました。")
-            return 0
+        if args.index is None:
+            # Continue rotating prepared posts instead of silently stopping when
+            # the end of posts.json is reached.
+            next_index = state.get("next_index", 0) % len(posts)
+        else:
+            next_index = args.index
+            if not 0 <= next_index < len(posts):
+                print("指定された投稿番号が範囲外です。", file=sys.stderr)
+                return 1
         post = posts[next_index]
 
     text = post["text"] if isinstance(post, dict) else post
@@ -382,7 +396,7 @@ def main() -> int:
         raise RuntimeError(f"投稿IDを取得できませんでした: {published}")
 
     if args.index is None and next_index is not None:
-        state["next_index"] = next_index + 1
+        state["next_index"] = (next_index + 1) % len(posts)
     if is_affiliate and affiliate_index is not None:
         state["next_affiliate_index"] = affiliate_index + 1
     state["last_post_id"] = post_id
