@@ -43,6 +43,56 @@ DAILY_TARGETS = {weekday: DAILY_WINDOWS for weekday in range(7)}
 MIN_POST_INTERVAL = timedelta(minutes=60)
 EARLY_START = timedelta(minutes=10)
 SLOT_GRACE = timedelta(minutes=15)
+WEATHER_WEEKDAYS = {0, 2, 5}  # Monday, Wednesday, Saturday
+NON_WEATHER_MORNING_POSTS = (
+    (
+        "おはようございます🌿\n\n"
+        "5歳は「自分で」、2歳は「イヤ！」。\n"
+        "朝だけで気力を使い切る日もあるよね😂\n\n"
+        "今日も60点で十分◎\n"
+        "今朝いちばん頑張ったこと、何ですか？"
+    ),
+    (
+        "おはようございます🌿\n\n"
+        "起こして、着替えさせて、ごはんを出した。\n"
+        "それだけでもう花丸👏\n\n"
+        "できなかったことより、できたことを数えよう。\n"
+        "今朝できたこと、ひとつ教えて。"
+    ),
+    (
+        "おはようございます🌿\n\n"
+        "「早くして」と言いたくないのに、\n"
+        "時計を見ると言ってしまう朝もある。\n\n"
+        "そんな日も大丈夫。今日また笑えたら十分◎\n"
+        "同じ人いる？"
+    ),
+    (
+        "おはようございます🌿\n\n"
+        "朝から部屋が散らかっていても、\n"
+        "家族が出発できたら勝ち😂\n\n"
+        "完璧な朝より、無事な朝。\n"
+        "今日は何を手放しますか？"
+    ),
+    (
+        "おはようございます🌿\n\n"
+        "眠い、時間ない、子どもは動かない😂\n"
+        "それでも朝を回してる私たち、ちゃんと頑張ってる。\n\n"
+        "今日も自分に優しくいこう。"
+    ),
+    (
+        "おはようございます🌿\n\n"
+        "5歳と2歳、同時に話しかけてくる朝。\n"
+        "全部に答えられなくても大丈夫。\n\n"
+        "ひとつずつで十分◎\n"
+        "みんなの朝あるある、ありますか？"
+    ),
+    (
+        "おはようございます🌿\n\n"
+        "朝ごはんが簡単でも、支度が少し遅れても大丈夫。\n"
+        "家族が笑って出発できたら100点◎\n\n"
+        "今日の手抜き、何にしますか？"
+    ),
+)
 
 
 def load_json(path: Path, default):
@@ -116,49 +166,44 @@ def fetch_tokyo_weather() -> dict | None:
         return None
 
 
+def stable_daily_choice(items: tuple[str, ...], now: datetime, salt: str) -> str:
+    seed = f"{now.date().isoformat()}:{salt}"
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    return items[int.from_bytes(digest[:8], "big") % len(items)]
+
+
 def build_morning_post(now: datetime) -> str:
-    """Create a short Tokyo-weather greeting with a relatable parenting line."""
+    """Alternate weather mornings with short encouragement and empathy mornings."""
+    if now.weekday() not in WEATHER_WEEKDAYS:
+        return stable_daily_choice(NON_WEATHER_MORNING_POSTS, now, "morning-empathy")
+
     weather = fetch_tokyo_weather()
     if weather is None:
-        fallback_lines = (
-            "靴下ひとつで予定が5分ずれる朝😂",
-            "『自分でやる！』を待つ時間も、朝の大仕事😂",
-            "出発直前の『トイレ！』までが朝のセット😂",
-        )
-        digest = hashlib.sha256(now.date().isoformat().encode("utf-8")).digest()
-        empathy = fallback_lines[digest[0] % len(fallback_lines)]
-        return (
-            "おはようございます☀️\n\n"
-            "東京の朝。5歳と2歳の支度は今日もにぎやか。\n"
-            f"{empathy}\n\n"
-            "今日も無理せずいきましょう。"
-        )
+        return stable_daily_choice(NON_WEATHER_MORNING_POSTS, now, "weather-fallback")
 
     code = weather["code"]
     rain_probability = weather["rain_probability"]
     max_temp = weather["max_temp"]
     min_temp = weather["min_temp"]
     if rain_probability >= 50 or 51 <= code <= 67 or 80 <= code <= 82:
-        empathy = "傘＋2人の手を守る雨の朝、家を出るだけで満点😂"
+        encouragement = "雨の朝は、家を出られたらそれだけで満点◎"
+        question = "雨の日の朝、いちばん大変なの何ですか？"
     elif max_temp >= 30:
-        empathy = "水筒と帽子の確認だけで、朝からひと仕事😂"
+        encouragement = "水筒と帽子を準備できたら、今日の朝はもう花丸👏"
+        question = "暑い朝の必需品、何を持たせていますか？"
     elif min_temp <= 10:
-        empathy = "上着を着せるだけでも、朝はひと仕事😂"
+        encouragement = "上着を着せて送り出せたら、それだけで十分◎"
+        question = "寒い朝、子どもを動かすコツありますか？"
     else:
-        empathy_lines = (
-            "靴下ひとつで予定が5分ずれる朝😂",
-            "『自分でやる！』を待つ時間も、朝の大仕事😂",
-            "出発直前の『トイレ！』までが朝のセット😂",
-        )
-        digest = hashlib.sha256(now.date().isoformat().encode("utf-8")).digest()
-        empathy = empathy_lines[digest[0] % len(empathy_lines)]
+        encouragement = "今日も完璧じゃなくて大丈夫。ひとつずついこう◎"
+        question = "今朝ひとつできたこと、何ですか？"
 
     return (
         f"おはようございます{weather['emoji']}\n\n"
         f"東京は{weather['description']}、最高{max_temp}℃／最低{min_temp}℃。"
         f"降水確率{rain_probability}％。\n"
-        f"{empathy}\n\n"
-        "今日も無理せずいきましょう。"
+        f"{encouragement}\n\n"
+        f"{question}"
     )
 
 
