@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 import post_threads
 
@@ -32,6 +33,22 @@ class ScheduleTests(unittest.TestCase):
         due = post_threads.scheduled_slot(self.state, recovery_time)
         self.assertIsNotNone(due)
         self.assertEqual(due[0], "morning")
+
+    @patch("post_threads.fetch_tokyo_weather")
+    def test_weather_post_is_emotional_not_a_forecast(self, fetch_weather):
+        fetch_weather.return_value = {
+            "code": 61,
+            "description": "雨",
+            "emoji": "☔",
+            "max_temp": 26,
+            "min_temp": 22,
+            "rain_probability": 100,
+        }
+        morning = datetime(2026, 8, 12, 7, 47, tzinfo=post_threads.JST)
+        text = post_threads.build_morning_post(morning)
+        self.assertIn("雨", text)
+        for forecast_word in ("東京", "最高", "最低", "降水確率", "26℃", "22℃", "100％"):
+            self.assertNotIn(forecast_word, text)
 
     def test_recovery_window_eventually_closes(self):
         too_late = datetime(2026, 8, 12, 11, 16, tzinfo=post_threads.JST)
