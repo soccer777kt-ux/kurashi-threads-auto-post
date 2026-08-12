@@ -43,8 +43,8 @@ DAILY_WINDOWS = {
 DAILY_TARGETS = {weekday: DAILY_WINDOWS for weekday in range(7)}
 MIN_POST_INTERVAL = timedelta(minutes=60)
 # GitHub's scheduled runs are best-effort and may arrive late.  Keep each slot
-# recoverable for a little over two hours, while stopping before the next slot.
-SLOT_GRACE = timedelta(hours=2, minutes=15)
+# recoverable for over three hours, while still stopping before the next slot.
+SLOT_GRACE = timedelta(hours=3, minutes=15)
 SLOT_TARGET_OFFSET_MINUTES = 7
 SLOT_TARGET_STEP_MINUTES = 10
 WEATHER_WEEKDAYS = {0, 2, 5}  # Monday, Wednesday, Saturday
