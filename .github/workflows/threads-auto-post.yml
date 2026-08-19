@@ -48,7 +48,8 @@ jobs:
           fi
 
       - name: Save posting position
-        if: ${{ success() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        # Preserve a pending affiliate reply even if the reply API call fails.
+        if: ${{ always() && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
         run: |
           if git diff --quiet -- state.json; then
             exit 0
