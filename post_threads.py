@@ -345,6 +345,36 @@ def publish_with_retry(creation_id: str, token: str) -> dict:
     raise RuntimeError(f"Threadsの投稿準備が時間内に完了しませんでした: {last_error}")
 
 
+def save_state(state: dict) -> None:
+    """Persist posting state, including any affiliate reply awaiting recovery."""
+    STATE_PATH.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def publish_text_reply(parent_post_id: str, reply_text: str, token: str) -> str:
+    """Publish a text reply beneath an already-published Threads post."""
+    created = api_post(
+        "/me/threads",
+        {
+            "media_type": "TEXT",
+            "text": reply_text,
+            "reply_to_id": parent_post_id,
+            "access_token": token,
+        },
+    )
+    creation_id = created.get("id")
+    if not creation_id:
+        raise RuntimeError(f"返信準備IDを取得できませんでした: {created}")
+
+    published = publish_with_retry(creation_id, token)
+    reply_id = published.get("id")
+    if not reply_id:
+        raise RuntimeError(f"返信IDを取得できませんでした: {published}")
+    return reply_id
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
@@ -357,6 +387,22 @@ def main() -> int:
     state = load_json(STATE_PATH, {"next_index": 0, "posted_slots": []})
     now = datetime.now(JST)
     print(f"実行時刻（日本時間）: {now.isoformat()}")
+
+    token = os.environ.get("THREADS_ACCESS_TOKEN")
+    pending_reply = state.get("pending_affiliate_reply")
+    if pending_reply and not args.dry_run:
+        if not token:
+            print("THREADS_ACCESS_TOKENが設定されていません。", file=sys.stderr)
+            return 1
+        print("未完了のAmazonリンク返信を復旧します。")
+        reply_id = publish_text_reply(
+            pending_reply["parent_post_id"], pending_reply["text"], token
+        )
+        state.pop("pending_affiliate_reply", None)
+        state["last_affiliate_reply_id"] = reply_id
+        save_state(state)
+        print(f"Amazonリンクを返信しました。Threads reply ID: {reply_id}")
+        return 0
 
     slot_name = None
     if args.scheduled:
@@ -394,7 +440,13 @@ def main() -> int:
         post = posts[next_index]
 
     text = post["text"] if isinstance(post, dict) else post
+    reply_text = post.get("reply_text") if is_affiliate else None
     image_path = post.get("image_path") if isinstance(post, dict) else None
+    if is_affiliate:
+        if not reply_text:
+            raise RuntimeError("Amazon投稿のreply_textが設定されていません。")
+        if "http://" in text or "https://" in text:
+            raise RuntimeError("Amazonリンクは本文ではなくreply_textに設定してください。")
     if slot_name == "morning":
         print("朝の天気・共感投稿")
     elif is_affiliate:
@@ -405,6 +457,9 @@ def main() -> int:
     else:
         print(f"投稿番号: {next_index + 1}/{len(posts)}")
     print(text)
+    if reply_text:
+        print("\n投稿後の最初の返信:")
+        print(reply_text)
     if image_path:
         print(f"画像: {image_path}")
 
@@ -412,7 +467,6 @@ def main() -> int:
         print("\nドライランのためThreadsには投稿していません。")
         return 0
 
-    token = os.environ.get("THREADS_ACCESS_TOKEN")
     if not token:
         print("THREADS_ACCESS_TOKENが設定されていません。", file=sys.stderr)
         return 1
@@ -459,12 +513,24 @@ def main() -> int:
         slots = [item for item in state.get("posted_slots", []) if item[:10] >= cutoff]
         slots.append(f"{now.date().isoformat()}-{completed_slot}")
         state["posted_slots"] = slots
-
-    STATE_PATH.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
     print(f"投稿しました。Threads post ID: {post_id}")
+
+    if reply_text:
+        # Save the parent immediately. If the reply API call fails, the workflow's
+        # always-run state step commits this recovery record. The next scheduled
+        # run retries only the reply instead of duplicating the parent post.
+        state["pending_affiliate_reply"] = {
+            "parent_post_id": post_id,
+            "text": reply_text,
+            "product_id": post.get("product_id"),
+        }
+        save_state(state)
+        reply_id = publish_text_reply(post_id, reply_text, token)
+        state.pop("pending_affiliate_reply", None)
+        state["last_affiliate_reply_id"] = reply_id
+        print(f"Amazonリンクを返信しました。Threads reply ID: {reply_id}")
+
+    save_state(state)
     return 0
 
 

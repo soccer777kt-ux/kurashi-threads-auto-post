@@ -1,3 +1,4 @@
+import json
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -53,6 +54,43 @@ class ScheduleTests(unittest.TestCase):
     def test_recovery_window_eventually_closes(self):
         too_late = datetime(2026, 8, 12, 11, 16, tzinfo=post_threads.JST)
         self.assertIsNone(post_threads.scheduled_slot(self.state, too_late))
+
+    def test_affiliate_links_are_only_in_the_first_reply(self):
+        affiliate_posts = json.loads(
+            post_threads.AFFILIATE_POSTS_PATH.read_text(encoding="utf-8")
+        )
+        self.assertTrue(affiliate_posts)
+        for post in affiliate_posts:
+            self.assertNotIn("http://", post["text"])
+            self.assertNotIn("https://", post["text"])
+            self.assertTrue(post["text"].endswith("私の生活が変わったのは…↓"))
+            self.assertIn("【広告", post["reply_text"])
+            self.assertIn("Amazonアソシエイト", post["reply_text"])
+            self.assertIn("https://amzn.to/", post["reply_text"])
+
+    @patch("post_threads.publish_with_retry")
+    @patch("post_threads.api_post")
+    def test_publish_text_reply_targets_parent_post(
+        self, api_post, publish_with_retry
+    ):
+        api_post.return_value = {"id": "reply-container"}
+        publish_with_retry.return_value = {"id": "reply-post"}
+
+        reply_id = post_threads.publish_text_reply(
+            "parent-post", "【広告】https://amzn.to/example", "secret-token"
+        )
+
+        self.assertEqual(reply_id, "reply-post")
+        api_post.assert_called_once_with(
+            "/me/threads",
+            {
+                "media_type": "TEXT",
+                "text": "【広告】https://amzn.to/example",
+                "reply_to_id": "parent-post",
+                "access_token": "secret-token",
+            },
+        )
+        publish_with_retry.assert_called_once_with("reply-container", "secret-token")
 
 
 if __name__ == "__main__":
