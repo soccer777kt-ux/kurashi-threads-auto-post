@@ -1,5 +1,5 @@
 {
-  "next_index": 49,
+  "next_index": 50,
   "posted_slots": [
     "2026-08-06-early",
     "2026-08-06-late_morning",
@@ -54,9 +54,10 @@
     "2026-08-19-lunch",
     "2026-08-19-night",
     "2026-08-20-morning",
-    "2026-08-20-lunch"
+    "2026-08-20-lunch",
+    "2026-08-20-night"
   ],
-  "last_post_id": "18101960414248091",
-  "last_posted_at": "2026-08-20T13:42:13.036577+09:00",
+  "last_post_id": "18050600108578690",
+  "last_posted_at": "2026-08-20T20:56:01.593717+09:00",
   "next_affiliate_index": 3
 }
