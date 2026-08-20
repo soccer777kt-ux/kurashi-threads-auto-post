@@ -47,6 +47,10 @@ MIN_POST_INTERVAL = timedelta(minutes=60)
 SLOT_GRACE = timedelta(hours=3, minutes=15)
 SLOT_TARGET_OFFSET_MINUTES = 7
 SLOT_TARGET_STEP_MINUTES = 10
+# Primary GitHub Actions runs start shortly before each window and wait for the
+# stable random target. This avoids depending on many best-effort cron events.
+SLOT_EARLY_START = timedelta(minutes=15)
+MAX_TARGET_WAIT = timedelta(minutes=75)
 WEATHER_WEEKDAYS = {0, 2, 5}  # Monday, Wednesday, Saturday
 AFFILIATE_SCHEDULE = {
     1: {"night"},  # Tuesday night
@@ -298,11 +302,14 @@ def current_due_slot(now: datetime) -> str | None:
     return None
 
 
-def scheduled_slot(state: dict, now: datetime) -> tuple[str, datetime] | None:
-    """Return one due, unposted slot and its stable random target time.
+def scheduled_slot(
+    state: dict, now: datetime, allow_future: bool = False
+) -> tuple[str, datetime] | None:
+    """Return one unposted slot that is due now or safe to wait for.
 
-    Scheduled jobs never sleep until the random target.  GitHub runs this check
-    repeatedly and the first run at or after the target publishes the post.
+    Primary scheduled jobs may start shortly before a window and wait for the
+    stable random target. Recovery jobs arriving after the target publish
+    immediately. Posted-slot state still prevents duplicates.
     """
     posted_slots = set(state.get("posted_slots", []))
     last_posted_at = state.get("last_posted_at")
@@ -313,11 +320,17 @@ def scheduled_slot(state: dict, now: datetime) -> tuple[str, datetime] | None:
 
     targets = DAILY_TARGETS[now.weekday()]
     for slot_name in sorted(targets, key=lambda name: targets[name][0]):
-        _, target, end = slot_timing(now, slot_name)
+        start, target, end = slot_timing(now, slot_name)
         slot_key = f"{now.date().isoformat()}-{slot_name}"
         if slot_key in posted_slots:
             continue
         if target <= now <= end + SLOT_GRACE:
+            return slot_name, target
+        if (
+            allow_future
+            and start - SLOT_EARLY_START <= now < target
+            and target - now <= MAX_TARGET_WAIT
+        ):
             return slot_name, target
     return None
 
@@ -379,6 +392,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--scheduled", action="store_true")
+    parser.add_argument("--wait-until-target", action="store_true")
     parser.add_argument("--index", type=int)
     args = parser.parse_args()
 
@@ -406,13 +420,19 @@ def main() -> int:
 
     slot_name = None
     if args.scheduled:
-        due = scheduled_slot(state, now)
+        due = scheduled_slot(state, now, allow_future=args.wait_until_target)
         if due is None:
             print("現在は投稿時間帯ではないか、この時間帯は投稿済みです。")
             return 0
         slot_name, target_time = due
         print(f"本日のランダム投稿時刻: {target_time.isoformat()}")
         print(f"対象時間帯: {slot_name}")
+        if target_time > now:
+            wait_seconds = (target_time - now).total_seconds()
+            print(f"ランダム投稿時刻まで{round(wait_seconds)}秒待機します。")
+            time.sleep(wait_seconds)
+            now = datetime.now(JST)
+            print(f"待機完了時刻（日本時間）: {now.isoformat()}")
 
     is_affiliate = False
     affiliate_index = None
