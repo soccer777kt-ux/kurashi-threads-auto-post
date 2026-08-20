@@ -29,6 +29,32 @@ class ScheduleTests(unittest.TestCase):
         state = {"posted_slots": [], "last_posted_at": "2026-08-11T22:00:00+09:00"}
         self.assertIsNone(post_threads.scheduled_slot(state, before_target))
 
+    def test_primary_run_can_wait_for_random_target(self):
+        before_lunch = datetime(2026, 8, 20, 11, 53, tzinfo=post_threads.JST)
+        state = {
+            "posted_slots": ["2026-08-20-morning"],
+            "last_posted_at": "2026-08-20T07:58:00+09:00",
+        }
+
+        due = post_threads.scheduled_slot(
+            state, before_lunch, allow_future=True
+        )
+
+        self.assertIsNotNone(due)
+        self.assertEqual(due[0], "lunch")
+        self.assertGreater(due[1], before_lunch)
+
+    def test_primary_wait_does_not_select_a_distant_slot(self):
+        too_early = datetime(2026, 8, 20, 11, 30, tzinfo=post_threads.JST)
+        state = {
+            "posted_slots": ["2026-08-20-morning"],
+            "last_posted_at": "2026-08-20T07:58:00+09:00",
+        }
+
+        self.assertIsNone(
+            post_threads.scheduled_slot(state, too_early, allow_future=True)
+        )
+
     def test_missed_morning_still_recovers_at_10_48(self):
         recovery_time = datetime(2026, 8, 12, 10, 48, tzinfo=post_threads.JST)
         due = post_threads.scheduled_slot(self.state, recovery_time)
