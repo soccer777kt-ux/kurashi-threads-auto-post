@@ -53,9 +53,11 @@
     "2026-08-20-morning",
     "2026-08-20-lunch",
     "2026-08-20-night",
-    "2026-08-21-morning"
+    "2026-08-21-morning",
+    "2026-08-21-lunch"
   ],
-  "last_post_id": "18113866268069538",
-  "last_posted_at": "2026-08-21T08:43:30.988935+09:00",
-  "next_affiliate_index": 3
+  "last_post_id": "18491434333096343",
+  "last_posted_at": "2026-08-21T13:05:16.541376+09:00",
+  "next_affiliate_index": 4,
+  "last_affiliate_reply_id": "18600009901140183"
 }
