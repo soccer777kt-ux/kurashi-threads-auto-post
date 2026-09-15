@@ -1,5 +1,5 @@
 {
-  "next_index": 26,
+  "next_index": 27,
   "posted_slots": [
     "2026-09-01-morning",
     "2026-09-01-lunch",
@@ -42,10 +42,11 @@
     "2026-09-13-night",
     "2026-09-14-morning",
     "2026-09-14-lunch",
-    "2026-09-15-morning"
+    "2026-09-15-morning",
+    "2026-09-15-lunch"
   ],
-  "last_post_id": "18087107876262987",
-  "last_posted_at": "2026-09-15T09:42:18.606825+09:00",
+  "last_post_id": "18115316395980351",
+  "last_posted_at": "2026-09-15T13:45:41.311041+09:00",
   "next_affiliate_index": 10,
   "last_affiliate_reply_id": "17886731961615887"
 }
