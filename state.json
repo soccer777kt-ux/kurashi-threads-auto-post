@@ -1,9 +1,6 @@
 {
   "next_index": 50,
   "posted_slots": [
-    "2026-09-16-morning",
-    "2026-09-16-lunch",
-    "2026-09-16-night",
     "2026-09-17-morning",
     "2026-09-17-lunch",
     "2026-09-17-night",
@@ -41,10 +38,11 @@
     "2026-09-29-morning",
     "2026-09-29-lunch",
     "2026-09-30-morning",
-    "2026-09-30-lunch"
+    "2026-09-30-lunch",
+    "2026-10-01-morning"
   ],
-  "last_post_id": "17932517946142233",
-  "last_posted_at": "2026-09-30T14:24:18.666764+09:00",
+  "last_post_id": "18129681706760574",
+  "last_posted_at": "2026-10-01T10:20:19.272236+09:00",
   "next_affiliate_index": 14,
   "last_affiliate_reply_id": "17948458566300802"
 }
